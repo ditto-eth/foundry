@@ -286,6 +286,28 @@ pub mod hevm {
                             constant: ::core::option::Option::None,
                             state_mutability: ::ethers_core::abi::ethabi::StateMutability::NonPayable,
                         },
+                        ::ethers_core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("cool"),
+                            inputs: ::std::vec![
+                                ::ethers_core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("slots"),
+                                    kind: ::ethers_core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers_core::abi::ethabi::ParamType::Tuple(
+                                                ::std::vec![
+                                                    ::ethers_core::abi::ethabi::ParamType::Address,
+                                                    ::ethers_core::abi::ethabi::ParamType::FixedBytes(32usize),
+                                                ],
+                                            ),
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::None,
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers_core::abi::ethabi::StateMutability::NonPayable,
+                        },
                     ],
                 ),
                 (
@@ -5456,6 +5478,15 @@ pub mod hevm {
                 .method_hash([64, 255, 159, 33], p0)
                 .expect("method not found (this should never happen)")
         }
+        ///Calls the contract's `cool` (0xe33d62f5) function
+        pub fn cool_with_slots(
+            &self,
+            slots: ::std::vec::Vec<StorageSlot>,
+        ) -> ::ethers_contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([227, 61, 98, 245], slots)
+                .expect("method not found (this should never happen)")
+        }
         ///Calls the contract's `copyFile` (0xa54a87d8) function
         pub fn copy_file(
             &self,
@@ -7720,6 +7751,21 @@ pub mod hevm {
     )]
     #[ethcall(name = "cool", abi = "cool(address)")]
     pub struct CoolCall(pub ::ethers_core::types::Address);
+    ///Container type for all input parameters for the `cool` function with signature `cool((address,bytes32)[])` and selector `0xe33d62f5`
+    #[derive(
+        Clone,
+        ::ethers_contract::EthCall,
+        ::ethers_contract::EthDisplay,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "cool", abi = "cool((address,bytes32)[])")]
+    pub struct CoolWithSlotsCall {
+        pub slots: ::std::vec::Vec<StorageSlot>,
+    }
     ///Container type for all input parameters for the `copyFile` function with signature `copyFile(string,string)` and selector `0xa54a87d8`
     #[derive(
         Clone,
@@ -10580,6 +10626,7 @@ pub mod hevm {
         CloseFile(CloseFileCall),
         Coinbase(CoinbaseCall),
         Cool(CoolCall),
+        CoolWithSlots(CoolWithSlotsCall),
         CopyFile(CopyFileCall),
         CreateDir(CreateDirCall),
         CreateFork1(CreateFork1Call),
@@ -10857,6 +10904,11 @@ pub mod hevm {
                 data,
             ) {
                 return Ok(Self::Cool(decoded));
+            }
+            if let Ok(decoded) = <CoolWithSlotsCall as ::ethers_core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::CoolWithSlots(decoded));
             }
             if let Ok(decoded) = <CopyFileCall as ::ethers_core::abi::AbiDecode>::decode(
                 data,
@@ -11882,6 +11934,9 @@ pub mod hevm {
                 }
                 Self::Coinbase(element) => ::ethers_core::abi::AbiEncode::encode(element),
                 Self::Cool(element) => ::ethers_core::abi::AbiEncode::encode(element),
+                Self::CoolWithSlots(element) => {
+                    ::ethers_core::abi::AbiEncode::encode(element)
+                }
                 Self::CopyFile(element) => ::ethers_core::abi::AbiEncode::encode(element),
                 Self::CreateDir(element) => {
                     ::ethers_core::abi::AbiEncode::encode(element)
@@ -12378,6 +12433,7 @@ pub mod hevm {
                 Self::CloseFile(element) => ::core::fmt::Display::fmt(element, f),
                 Self::Coinbase(element) => ::core::fmt::Display::fmt(element, f),
                 Self::Cool(element) => ::core::fmt::Display::fmt(element, f),
+                Self::CoolWithSlots(element) => ::core::fmt::Display::fmt(element, f),
                 Self::CopyFile(element) => ::core::fmt::Display::fmt(element, f),
                 Self::CreateDir(element) => ::core::fmt::Display::fmt(element, f),
                 Self::CreateFork1(element) => ::core::fmt::Display::fmt(element, f),
@@ -12671,6 +12727,11 @@ pub mod hevm {
     impl ::core::convert::From<CoolCall> for HEVMCalls {
         fn from(value: CoolCall) -> Self {
             Self::Cool(value)
+        }
+    }
+    impl ::core::convert::From<CoolWithSlotsCall> for HEVMCalls {
+        fn from(value: CoolWithSlotsCall) -> Self {
+            Self::CoolWithSlots(value)
         }
     }
     impl ::core::convert::From<CopyFileCall> for HEVMCalls {
@@ -15193,6 +15254,21 @@ pub mod hevm {
     pub struct Rpc {
         pub name: ::std::string::String,
         pub url: ::std::string::String,
+    }
+    ///`StorageSlot(address,bytes32)`
+    #[derive(
+        Clone,
+        ::ethers_contract::EthAbiType,
+        ::ethers_contract::EthAbiCodec,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct StorageSlot {
+        pub target: ::ethers_core::types::Address,
+        pub slot: [u8; 32],
     }
     ///`Wallet(address,uint256,uint256,uint256)`
     #[derive(

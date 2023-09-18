@@ -71,6 +71,11 @@ interface Vm {
         bytes stderr;
     }
 
+    struct StorageSlot {
+        address target;
+        bytes32 slot;
+    }
+
     // Set block.timestamp (newTimestamp)
     function warp(uint256) external;
 
@@ -96,8 +101,14 @@ interface Vm {
     // Stores a value to an address' storage slot, (who, slot, value)
     function store(address, bytes32, bytes32) external;
 
-    // Cools off a warm address and its storage slots
-    function cool(address) external;
+    // Marks the `target` address cold, and is a no-op if the address is already cold.
+    // All storage slots are are also made cold, but their values are preserved.
+    function cool(address target) external;
+
+    // Marks the specified `(target, slot)` pairs cold, and is a no-op if they are already cold.
+    // Reverts if the `target` has no code, since if there's no code it cannot have storage.
+    // The values of storage slots are preserved.
+    function cool(StorageSlot[] memory slots) external;
 
     // Signs data, (privateKey, digest) => (v, r, s)
     function sign(uint256, bytes32) external returns (uint8, bytes32, bytes32);

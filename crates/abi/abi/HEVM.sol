@@ -5,6 +5,7 @@ struct DirEntry { string errorMessage; string path; uint64 depth; bool isDir; bo
 struct FsMetadata { bool isDir; bool isSymlink; uint256 length; bool readOnly; uint256 modified; uint256 accessed; uint256 created; }
 struct Wallet { address addr; uint256 publicKeyX; uint256 publicKeyY; uint256 privateKey; }
 struct FfiResult { int32 exitCode; bytes stdout; bytes stderr; }
+struct StorageSlot { address target; bytes32 slot; }
 
 allowCheatcodes(address)
 
@@ -23,6 +24,7 @@ coinbase(address)
 store(address,bytes32,bytes32)
 load(address,bytes32)(bytes32)
 cool(address)
+cool(StorageSlot[] memory slots)
 
 setEnv(string,string)
 envBool(string)(bool)

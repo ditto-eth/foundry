@@ -23,7 +23,7 @@ use revm::{
     primitives::{Bytecode, SpecId, KECCAK_EMPTY},
     Database, EVMData,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Clone, Debug, Default)]
 pub struct Broadcast {
@@ -321,14 +321,12 @@ fn add_breakpoint(state: &mut Cheatcodes, caller: Address, inner: &str, add: boo
 }
 
 // mark the slots of an account and the account address as cold
-fn cool_account<DB: DatabaseExt>(data: &mut EVMData<'_, DB>, address: Address) -> Result {
-    if let Some(account) = data.journaled_state.state.get_mut(&address.to_alloy()) {
-        if account.is_touched() {
-            account.unmark_touch();
-        }
-        account.storage.clear();
-    }
-
+fn cool_account(state: &mut Cheatcodes, address: Address) -> Result {
+    ensure!(!is_potential_precompile(address), "Cool cannot be used on precompile addresses (N < 10). Please use an address bigger than 10 instead");
+    let b_address = address.to_alloy();
+    state.cool.insert(b_address, true);
+    state.cool_storage.insert(b_address, HashMap::new());
+    println!("cooling {:?}", b_address);
     Ok(Bytes::new())
 }
 
@@ -401,7 +399,7 @@ pub fn apply<DB: DatabaseExt>(
             )?;
             DynSolValue::from(val).encode_single().into()
         }
-        HEVMCalls::Cool(inner) => cool_account(data, inner.0)?,
+        HEVMCalls::Cool(inner) => cool_account(state, inner.0)?,
         HEVMCalls::Breakpoint0(inner) => add_breakpoint(state, caller, &inner.0, true)?,
         HEVMCalls::Breakpoint1(inner) => add_breakpoint(state, caller, &inner.0, inner.1)?,
         HEVMCalls::Etch(inner) => {
