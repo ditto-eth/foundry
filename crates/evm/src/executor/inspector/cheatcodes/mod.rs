@@ -11,6 +11,7 @@ use crate::{
         backend::DatabaseExt, inspector::cheatcodes::env::RecordedLogs, CHEATCODE_ADDRESS,
         HARDHAT_CONSOLE_ADDRESS,
     },
+    utils::u256_to_h256_be,
 };
 use alloy_primitives::{Address as rAddress, Bytes, B256};
 use ethers::{
@@ -208,11 +209,23 @@ pub struct Cheatcodes {
     pub prev_opcode_gas: Gas,
 
     // Whether cool cheatcode was called on each address
-    pub cool: HashMap<B160, bool>,
+    pub cool: HashMap<Address, CoolState>,
     // Whether an addresses storage slot is cool or not
-    pub cool_storage: HashMap<B160, HashMap<U256, bool>>,
+    pub cool_storage: HashMap<Address, HashMap<U256, CoolStorageState>>,
     // How much gas to add to the next step/op code due to a cool storage slot
     pub additional_gas_next_op: u64,
+}
+
+#[derive(Clone, Debug)]
+pub enum CoolState {
+    CalledAndAccessed,
+    Called,
+}
+
+#[derive(Clone, Debug)]
+pub enum CoolStorageState {
+    Warm,
+    WarmAndSStored,
 }
 
 impl Cheatcodes {
@@ -571,8 +584,17 @@ impl<DB: DatabaseExt> Inspector<DB> for Cheatcodes {
             opcode::CREATE2 |
             opcode::STOP |
             opcode::RETURN |
+            opcode::EXTCODECOPY |
+            opcode::EXTCODEHASH |
+            opcode::EXTCODESIZE |
+            opcode::BALANCE |
             opcode::SELFDESTRUCT |
-            opcode::REVERT => {
+            opcode::GAS |
+            opcode::REVERT |
+            opcode::DELEGATECALL |
+            opcode::CALL |
+            opcode::STATICCALL |
+            opcode::CALLCODE => {
                 let gas_diff = if interpreter.gas.spend() >= self.prev_opcode_gas.spend() {
                     interpreter.gas.spend() - self.prev_opcode_gas.spend()
                 } else {
@@ -592,7 +614,19 @@ impl<DB: DatabaseExt> Inspector<DB> for Cheatcodes {
         match interpreter.current_opcode() {
             opcode::SLOAD => {
                 let key = try_or_continue!(interpreter.stack().peek(0));
-                println!("SLOAD  addr {}, key {}", interpreter.contract().address, key);
+
+                let account =
+                    data.journaled_state.state().get(&interpreter.contract().address).unwrap();
+                if let Some(slot) = account.storage.get(&key) {
+                    println!(
+                        "SLOAD  addr {}, key {}, val {}",
+                        interpreter.contract().address,
+                        key,
+                        slot.present_value
+                    );
+                } else {
+                    println!("SLOAD  addr {}, key {}", interpreter.contract().address, key);
+                }
             }
             opcode::SSTORE => {
                 let key = try_or_continue!(interpreter.stack().peek(0));
@@ -604,69 +638,175 @@ impl<DB: DatabaseExt> Inspector<DB> for Cheatcodes {
                     val
                 );
             }
+            opcode::EXTCODESIZE => {
+                let key = try_or_continue!(interpreter.stack().peek(0));
+                println!("EXTCODESIZE addr {}", key);
+            }
             _ => {}
         }
         // LOGGING END
 
         // if cool cheatcode was ever called on this address
-        let contract_address = &interpreter.contract().address;
-        if self.cool.get(contract_address).is_some() {
-            if let Some(contract_storage) = self.cool_storage.get_mut(contract_address) {
-                match interpreter.current_opcode() {
-                    opcode::SLOAD => {
-                        let key = try_or_continue!(interpreter.stack().peek(0));
+        let contract_address = interpreter.contract().address.to_ethers();
+        match self.cool.get(&contract_address) {
+            Some(CoolState::Called) | Some(CoolState::CalledAndAccessed) => {
+                if let Some(contract_storage) = self.cool_storage.get_mut(&contract_address) {
+                    match interpreter.current_opcode() {
+                        // via AccessListTracer
+                        opcode::EXTCODECOPY |
+                        opcode::EXTCODEHASH |
+                        opcode::EXTCODESIZE |
+                        opcode::BALANCE |
+                        opcode::SELFDESTRUCT => {
+                            let key = u256_to_h256_be(
+                                try_or_continue!(interpreter.stack().peek(0)).to_ethers(),
+                            )
+                            .into();
 
-                        // only add gas the first time the storage is touched again
-                        match contract_storage.get(&ru256_to_u256(key)) {
-                            Some(_) => {}
-                            None => {
-                                contract_storage.insert(ru256_to_u256(key), true);
-                                self.additional_gas_next_op = 2000;
-                                println!("warm key {}", key);
-                            }
-                        }
-                    }
-                    opcode::SSTORE => {
-                        let key = try_or_continue!(interpreter.stack().peek(0));
-                        let val = try_or_continue!(interpreter.stack().peek(1));
-
-                        let account = data.journaled_state.state().get(contract_address).unwrap();
-                        if let Some(slot) = account.storage.get(&key) {
                             println!(
-                                "slot {} {} ",
-                                slot.present_value, slot.previous_or_original_value
+                                "{:>14}, key {:?} ",
+                                format!("{}", OpCode(self.prev_opcode)),
+                                key
                             );
 
-                            // only add gas the first time the storage is touched again
-                            match contract_storage.get(&ru256_to_u256(key)) {
-                                Some(_) => {} // TODO: useful when passing storage slots
-                                None => {
-                                    // add the COLD_SLOAD_COST
-                                    self.additional_gas_next_op = 2100;
-
-                                    // set slot is_warm to true
-                                    contract_storage.insert(ru256_to_u256(key), true);
-
-                                    // cool keeps the slot value changes
-                                    // as if the previous_or_original_value = present_value`
-                                    // so include the extra gas
-                                    let slot = account.storage.get(&key).unwrap();
-                                    if val != slot.present_value &&
-                                        slot.present_value != slot.previous_or_original_value
-                                    {
-                                        if slot.present_value == U256::zero().into() {
-                                            self.additional_gas_next_op += 20000 - 100
-                                        } else {
-                                            self.additional_gas_next_op += 2900 - 100
-                                        }
-                                    }
-                                }
+                            if let Some(CoolState::Called) = self.cool.get(&key) {
+                                self.additional_gas_next_op = 2500;
+                                self.cool.insert(contract_address, CoolState::CalledAndAccessed);
                             }
                         }
+                        // via AccessListTracer
+                        opcode::DELEGATECALL |
+                        opcode::CALL |
+                        opcode::STATICCALL |
+                        opcode::CALLCODE => {
+                            let key = u256_to_h256_be(
+                                try_or_continue!(interpreter.stack().peek(1)).to_ethers(),
+                            )
+                            .into();
+
+                            println!(
+                                "{:>14}, key {:?} ",
+                                format!("{}", OpCode(self.prev_opcode)),
+                                key
+                            );
+
+                            if let Some(CoolState::Called) = self.cool.get(&key) {
+                                self.additional_gas_next_op = 2500;
+                                self.cool.insert(contract_address, CoolState::CalledAndAccessed);
+                            }
+                        }
+                        opcode::SLOAD => {
+                            let key = try_or_continue!(interpreter.stack().peek(0));
+
+                            let account = data
+                                .journaled_state
+                                .state()
+                                .get(&contract_address.to_alloy())
+                                .unwrap();
+                            if let Some(slot) = account.storage.get(&key) {
+                                println!(
+                                    "slot {} {} ",
+                                    slot.present_value, slot.previous_or_original_value
+                                );
+
+                                // only add gas the first time the storage is touched again
+                                match contract_storage.get(&key.to_ethers()) {
+                                    Some(_) => {
+                                        println!("sl warm key {}", key);
+                                    }
+                                    None => {
+                                        contract_storage
+                                            .insert(key.to_ethers(), CoolStorageState::Warm);
+                                        self.additional_gas_next_op = 2000;
+                                        println!("sl warm (none) key {}", key);
+                                    }
+                                }
+                            } else {
+                                println!("sl key not accessed? {}", key);
+                                contract_storage.insert(key.to_ethers(), CoolStorageState::Warm);
+                            }
+                        }
+                        opcode::SSTORE => {
+                            let key = try_or_continue!(interpreter.stack().peek(0));
+                            let val = try_or_continue!(interpreter.stack().peek(1));
+
+                            let account = data
+                                .journaled_state
+                                .state()
+                                .get(&contract_address.to_alloy())
+                                .unwrap();
+                            if let Some(slot) = account.storage.get(&key) {
+                                println!(
+                                    "slot {} {} ",
+                                    slot.present_value, slot.previous_or_original_value
+                                );
+
+                                // only add gas the first time the storage is touched again
+                                match contract_storage.get(&key.to_ethers()) {
+                                    Some(CoolStorageState::WarmAndSStored) => {
+                                        println!("ss warm + sstored key {}", key);
+                                    }
+                                    Some(CoolStorageState::Warm) => {
+                                        // set slot is_warm to true
+                                        contract_storage.insert(
+                                            key.to_ethers(),
+                                            CoolStorageState::WarmAndSStored,
+                                        );
+
+                                        // cool keeps the slot value changes
+                                        // as if the previous_or_original_value = present_value`
+                                        // so include the extra gas
+                                        let slot = account.storage.get(&key).unwrap();
+                                        if val != slot.present_value &&
+                                            slot.present_value != slot.previous_or_original_value
+                                        {
+                                            if slot.present_value == U256::zero().to_alloy() {
+                                                self.additional_gas_next_op += 20000 - 100
+                                            } else {
+                                                self.additional_gas_next_op += 2900 - 100
+                                            }
+                                        }
+                                        println!("ss warm key {}", key);
+                                    }
+                                    None => {
+                                        println!("EVEN possible anymore? {}", key);
+
+                                        // add the COLD_SLOAD_COST
+                                        self.additional_gas_next_op = 2100;
+
+                                        // set slot is_warm to true
+                                        contract_storage.insert(
+                                            key.to_ethers(),
+                                            CoolStorageState::WarmAndSStored,
+                                        );
+
+                                        // cool keeps the slot value changes
+                                        // as if the previous_or_original_value = present_value`
+                                        // so include the extra gas
+                                        let slot = account.storage.get(&key).unwrap();
+                                        if val != slot.present_value &&
+                                            slot.present_value != slot.previous_or_original_value
+                                        {
+                                            if slot.present_value == U256::zero().to_alloy() {
+                                                self.additional_gas_next_op += 20000 - 100
+                                            } else {
+                                                self.additional_gas_next_op += 2900 - 100
+                                            }
+                                        }
+                                        println!("ss warm key (none) {}", key);
+                                    }
+                                }
+                            } else {
+                                contract_storage
+                                    .insert(key.to_ethers(), CoolStorageState::WarmAndSStored);
+                                println!("ss key not accessed? {}", key);
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
+            None => {}
         }
 
         self.prev_opcode = interpreter.current_opcode();

@@ -6,7 +6,7 @@ use crate::{
         inspector::cheatcodes::{
             mapping::{get_mapping_key_and_parent, get_mapping_length, get_mapping_slot_at},
             util::{is_potential_precompile, with_journaled_account},
-            DealRecord,
+            CoolState, DealRecord,
         },
     },
 };
@@ -320,13 +320,12 @@ fn add_breakpoint(state: &mut Cheatcodes, caller: Address, inner: &str, add: boo
     Ok(Bytes::new())
 }
 
-// mark the slots of an account and the account address as cold
+// setup the state to mark the slots of an account and the account address as cold
 fn cool_account(state: &mut Cheatcodes, address: Address) -> Result {
     ensure!(!is_potential_precompile(address), "Cool cannot be used on precompile addresses (N < 10). Please use an address bigger than 10 instead");
-    let b_address = address.to_alloy();
-    state.cool.insert(b_address, true);
-    state.cool_storage.insert(b_address, HashMap::new());
-    println!("cooling {:?}", b_address);
+    println!("cooling {:?}", address);
+    state.cool.insert(address, CoolState::Called);
+    state.cool_storage.insert(address, HashMap::new());
     Ok(Bytes::new())
 }
 
